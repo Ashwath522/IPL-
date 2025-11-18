@@ -1,5 +1,5 @@
-# app.py — Version A merged with per-team selection + IPL theme (local path)
-# Keep all original charts/filters/behavior; added team select and Play Team Theme (plays local mp3).
+# app.py — FULL Version A with IPL bat+ball animation + your local MP3 path
+# Everything else left unchanged; only the sound function plays the IPL theme MP3 (no synthetic fallback beep).
 import os
 import time
 import streamlit as st
@@ -30,78 +30,38 @@ THEME_MP3_PATH = r"d:\Users\DELL\Downloads\ipl_theme.mp3"
 # ---------------------------
 def play_ipl_theme_with_animation(message="That’s a lovely shot!"):
     """
-    Shows a short bat+ball animation and plays the MP3 at THEME_MP3_PATH (local file).
-    If the mp3 path does not exist, shows a fallback short synthetic audio + animation.
+    Shows a short bat+ball animation and plays ONLY the IPL theme MP3 at THEME_MP3_PATH (local file).
+    If the mp3 path does not exist, the visual animation still runs but no sound is played.
     """
     mp3_path = THEME_MP3_PATH.replace("\\", "/")
+
+    # Animation HTML (always shown)
+    animation_html = f"""
+    <style>
+    .wrap {{ position:relative; width:100%; height:140px; overflow:hidden; }}
+    .bat {{ font-size:52px; position:absolute; left:-30%; top:10px; animation:swing 0.8s ease-out 0s 1 forwards; }}
+    .ball{{ font-size:48px; position:absolute; left:-10%; top:40px; animation:roll 0.8s ease-out 0s 1 forwards; }}
+    @keyframes swing {{ 0%{{left:-30%; transform:rotate(-30deg); opacity:0}} 30%{{left:8%; opacity:1}} 100%{{left:110%; transform:rotate(20deg);}} }}
+    @keyframes roll  {{ 0%{{left:-10%; transform:rotate(0deg); opacity:0}} 40%{{opacity:1}} 100%{{left:120%; transform:rotate(720deg);}} }}
+    .msg {{ font-weight:700; margin-top:6px; font-size:16px; text-align:center; }}
+    .confetti {{ font-size:22px; text-align:center; margin-top:6px; }}
+    </style>
+
+    <div class="wrap"><div class="bat">🏏</div><div class="ball">🏐</div></div>
+    <div class="msg">{message}</div>
+    <div class="confetti">🎉👏🔥</div>
+    """
+
+    # Append audio tag only if file exists
     if os.path.exists(THEME_MP3_PATH):
-        html = f"""
-        <style>
-        .wrap {{ position:relative; width:100%; height:140px; overflow:hidden; }}
-        .bat {{ font-size:52px; position:absolute; left:-30%; top:10px; animation:swing 0.8s ease-out 0s 1 forwards; }}
-        .ball{{ font-size:48px; position:absolute; left:-10%; top:40px; animation:roll 0.8s ease-out 0s 1 forwards; }}
-        @keyframes swing {{ 0%{{left:-30%; transform:rotate(-30deg); opacity:0}} 30%{{left:8%; opacity:1}} 100%{{left:110%; transform:rotate(20deg);}} }}
-        @keyframes roll  {{ 0%{{left:-10%; transform:rotate(0deg); opacity:0}} 40%{{opacity:1}} 100%{{left:120%; transform:rotate(720deg);}} }}
-        .msg {{ font-weight:700; margin-top:6px; font-size:16px; text-align:center; }}
-        .confetti {{ font-size:22px; text-align:center; margin-top:6px; }}
-        </style>
-
-        <div class="wrap"><div class="bat">🏏</div><div class="ball">🏐</div></div>
-        <div class="msg">{message}</div>
-        <div class="confetti">🎉👏🔥</div>
-
+        animation_html += f"""
         <audio autoplay>
           <source src="file:///{mp3_path}" type="audio/mpeg">
           Your browser does not support the audio element.
         </audio>
         """
-        # height should allow player UI and visuals
-        components.html(html, height=240)
-    else:
-        # fallback to synthetic short audio + animation if mp3 not found
-        js_html = r"""
-        <style>
-        .celebrate { text-align:center; font-weight:700; margin-top:6px; }
-        .wrap { position:relative; width:100%; height:90px; overflow:hidden; }
-        .bat { font-size:48px; position:absolute; left:-30%; top:8px; animation: swing 0.7s ease-out 0s 1 forwards; }
-        .ball{ font-size:44px; position:absolute; left:-10%; top:30px; animation: roll 0.7s ease-out 0s 1 forwards; }
-        @keyframes swing { 0%{left:-30%; transform:rotate(-30deg); opacity:0} 30%{left:8%; opacity:1} 100%{left:110%; transform:rotate(20deg);} }
-        @keyframes roll  { 0%{left:-10%; transform:rotate(0deg); opacity:0} 40%{opacity:1} 100%{left:120%; transform:rotate(720deg);} }
-        .confetti { font-size:22px; margin-top:6px; }
-        </style>
-        <div class="wrap"><div class="bat">🏏</div><div class="ball">🏐</div></div>
-        <div class="celebrate">""" + message + r"""</div>
-        <div class="confetti">🎉👏🔥</div>
 
-        <script>
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const now = ctx.currentTime;
-          function playBlast(time, duration, gainVal, freq) {
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.type = 'square';
-            o.frequency.setValueAtTime(freq, time);
-            g.gain.setValueAtTime(gainVal, time);
-            g.gain.exponentialRampToValueAtTime(0.001, time + duration);
-            o.connect(g); g.connect(ctx.destination);
-            o.start(time);
-            o.stop(time + duration + 0.02);
-          }
-          let t = now + 0.05;
-          const short = 0.06;
-          playBlast(t, short, 0.04, 600); t += 0.09;
-          playBlast(t, short, 0.04, 700); t += 0.09;
-          playBlast(t, short, 0.04, 800); t += 0.2;
-          playBlast(t, short, 0.045, 600); t += 0.09;
-          playBlast(t, short, 0.045, 700); t += 0.09;
-          playBlast(t, short, 0.045, 800);
-        } catch(e) {
-          console.log("Audio error:", e);
-        }
-        </script>
-        """
-        components.html(js_html, height=170)
+    components.html(animation_html, height=240)
 
 # ---------------------------
 # Sample dataset generator (original)
@@ -421,6 +381,6 @@ if st.button("Quick Animate Bars"):
         fig.update_traces(marker_line_color='black', marker_line_width=1)
         st.plotly_chart(fig, use_container_width=True)
         time.sleep(anim_speed_local)
-    # replaced balloons with IPL animation + sound
+    # replaced balloons with IPL animation + sound (now only plays IPL theme mp3 if present)
     play_ipl_theme_with_animation("Quick animation finished — enjoy the IPL vibe!")
     st.success("Quick animation finished.")
