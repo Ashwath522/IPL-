@@ -1,26 +1,27 @@
-# app.py — Interactive, shorter animations + IPL sound + cleaner money axes (lakhs)
+# app.py — IPL Auction Visualizer (complete)
+import os
+import time
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 from streamlit_plotly_events import plotly_events
 import streamlit.components.v1 as components
-import time
 
 st.set_page_config(layout="wide", page_title="IPL Auction Visualizer (Interactive)", page_icon="🏏")
 st.title("IPL Auction Visualizer — Interactive & Celebratory")
-st.markdown("Click a team bar to focus. Use animation buttons to run a short celebration (visual + IPL sound). Money shown in **lakhs (₹ ×100k)** for readability.")
+st.markdown("Upload your dataset and optional IPL theme MP3 in the sidebar. Press the animation buttons to run the short cricket animation + sound.")
 
 # -------------------------
-# small helpers
+# Helpers / Sample data
 # -------------------------
 @st.cache_data
-def generate_sample_dataset(n_rows=200, seed=42):
+def generate_sample_dataset(n_rows=300, seed=42):
     rng = np.random.RandomState(seed)
-    teams = ["CSK", "MI", "RCB", "KKR", "SRH", "RR", "DC", "PBKS"]
-    roles = ["Batsman", "Bowler", "All-Rounder", "Wicket-Keeper"]
-    players = [f"Player_{i}" for i in range(1, 1001)]
-    rows = []
+    teams = ["CSK","MI","RCB","KKR","SRH","RR","DC","PBKS"]
+    roles = ["Batsman","Bowler","All-Rounder","Wicket-Keeper"]
+    players = [f"Player_{i}" for i in range(1,1501)]
+    rows=[]
     for i in range(n_rows):
         team = rng.choice(teams)
         role = rng.choice(roles, p=[0.35,0.33,0.22,0.10])
@@ -31,75 +32,110 @@ def generate_sample_dataset(n_rows=200, seed=42):
         need = int(rng.randint(1,5))
         base = int(rng.choice([20,30,40,50,60,75,100]) * 1_00_000)
         rows.append({
-            "Team": team,
-            "Player_Role": role,
-            "Purse_Remaining": purse,
-            "Target_Player": target,
-            "Expected_Bid": expected,
-            "Buy_Probability(%)": prob,
-            "Players_Needed": need,
-            "Base_Price": base
+            "Team":team,
+            "Player_Role":role,
+            "Purse_Remaining":purse,
+            "Target_Player":target,
+            "Expected_Bid":expected,
+            "Buy_Probability(%)":prob,
+            "Players_Needed":need,
+            "Base_Price":base
         })
     return pd.DataFrame(rows)
 
-def play_ipl_sound_and_show_animation(message="That’s a lovely shot!"):
-    """Show a short bat+ball animation + play IPL 'ppp pppp' sound (WebAudio) and confetti text."""
-    # JS uses WebAudio to play a short percussive 'ppp pppp' pattern and shows CSS animation
-    js_html = r"""
-    <style>
-    .celebrate { text-align:center; font-weight:700; margin-top:6px; }
-    .wrap { position:relative; width:100%; height:90px; overflow:hidden; }
-    .bat { font-size:48px; position:absolute; left:-30%; top:8px; animation: swing 0.7s ease-out 0s 1 forwards; }
-    .ball{ font-size:44px; position:absolute; left:-10%; top:30px; animation: roll 0.7s ease-out 0s 1 forwards; }
-    @keyframes swing { 0%{left:-30%; transform:rotate(-30deg); opacity:0} 30%{left:8%; opacity:1} 100%{left:110%; transform:rotate(20deg);} }
-    @keyframes roll  { 0%{left:-10%; transform:rotate(0deg); opacity:0} 40%{opacity:1} 100%{left:120%; transform:rotate(720deg);} }
-    .confetti { font-size:22px; margin-top:6px; }
-    </style>
-    <div class="wrap"><div class="bat">🏏</div><div class="ball">🏐</div></div>
-    <div class="celebrate">""" + message + r"""</div>
-    <div class="confetti">🎉👏🔥</div>
+# -------------------------
+# IPL theme uploader (sidebar)
+# -------------------------
+st.sidebar.header("Optional: Upload MP3 theme")
+uploaded_ipl_theme = st.sidebar.file_uploader("Upload IPL theme MP3 (optional)", type=["mp3"])
+if uploaded_ipl_theme is not None:
+    save_path = "/mnt/data/ipl_theme.mp3"
+    with open(save_path, "wb") as f:
+        f.write(uploaded_ipl_theme.getbuffer())
+    st.sidebar.success("Saved IPL theme to /mnt/data/ipl_theme.mp3 (will be used for animation)")
 
-    <script>
-    // tiny WebAudio routine to play 2 quick 'ppp pppp' percussion sounds
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const now = ctx.currentTime;
-      // function to play short noise-like 'ppp'
-      function playBlast(time, duration, gainVal, freq) {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.type = 'square';
-        o.frequency.setValueAtTime(freq, time);
-        g.gain.setValueAtTime(gainVal, time);
-        g.gain.exponentialRampToValueAtTime(0.001, time + duration);
-        o.connect(g); g.connect(ctx.destination);
-        o.start(time);
-        o.stop(time + duration + 0.02);
-      }
-      // schedule pattern: two groups of short blasts: p p p  (two groups)
-      let t = now + 0.05;
-      const short = 0.06;
-      // first group (3 quick hits)
-      playBlast(t, short, 0.04, 600); t += 0.09;
-      playBlast(t, short, 0.04, 700); t += 0.09;
-      playBlast(t, short, 0.04, 800); t += 0.2;
-      // second group (3 quick hits)
-      playBlast(t, short, 0.045, 600); t += 0.09;
-      playBlast(t, short, 0.045, 700); t += 0.09;
-      playBlast(t, short, 0.045, 800);
-    } catch(e) {
-      // ignore if WebAudio not available
-      console.log("Audio error:", e);
-    }
-    </script>
+def play_ipl_theme_with_animation(message="That’s a lovely shot!"):
     """
-    components.html(js_html, height=170)
+    Plays uploaded mp3 if found at /mnt/data/ipl_theme.mp3. Otherwise falls back to synthetic WebAudio.
+    Shows a short bat+ball animation and confetti text using embedded HTML/JS.
+    """
+    mp3_path = "/mnt/data/ipl_theme.mp3"
+    if os.path.exists(mp3_path):
+        # use HTML audio tag to autoplay uploaded mp3
+        html = fr"""
+        <style>
+        .wrap {{ position:relative; width:100%; height:140px; overflow:hidden; }}
+        .bat {{ font-size:52px; position:absolute; left:-30%; top:10px; animation:swing 0.8s ease-out 0s 1 forwards; }}
+        .ball{{ font-size:48px; position:absolute; left:-10%; top:40px; animation:roll 0.8s ease-out 0s 1 forwards; }}
+        @keyframes swing {{ 0%{{left:-30%; transform:rotate(-30deg); opacity:0}} 30%{{left:8%; opacity:1}} 100%{{left:110%; transform:rotate(20deg);}} }}
+        @keyframes roll  {{ 0%{{left:-10%; transform:rotate(0deg); opacity:0}} 40%{{opacity:1}} 100%{{left:120%; transform:rotate(720deg);}} }}
+        .msg {{ font-weight:700; margin-top:6px; font-size:16px; text-align:center; }}
+        .confetti {{ font-size:22px; text-align:center; margin-top:6px; }}
+        </style>
+
+        <div class="wrap"><div class="bat">🏏</div><div class="ball">🏐</div></div>
+        <div class="msg">{message}</div>
+        <div class="confetti">🎉👏🔥</div>
+
+        <audio autoplay>
+          <source src="file://{mp3_path}" type="audio/mpeg">
+          Your browser does not support the audio element.
+        </audio>
+        """
+        components.html(html, height=240)
+    else:
+        # fallback: WebAudio 'ppp pppp' pattern
+        js_html = r"""
+        <style>
+        .celebrate { text-align:center; font-weight:700; margin-top:6px; }
+        .wrap { position:relative; width:100%; height:90px; overflow:hidden; }
+        .bat { font-size:48px; position:absolute; left:-30%; top:8px; animation: swing 0.7s ease-out 0s 1 forwards; }
+        .ball{ font-size:44px; position:absolute; left:-10%; top:30px; animation: roll 0.7s ease-out 0s 1 forwards; }
+        @keyframes swing { 0%{left:-30%; transform:rotate(-30deg); opacity:0} 30%{left:8%; opacity:1} 100%{left:110%; transform:rotate(20deg);} }
+        @keyframes roll  { 0%{left:-10%; transform:rotate(0deg); opacity:0} 40%{opacity:1} 100%{left:120%; transform:rotate(720deg);} }
+        .confetti { font-size:22px; margin-top:6px; }
+        </style>
+        <div class="wrap"><div class="bat">🏏</div><div class="ball">🏐</div></div>
+        <div class="celebrate">""" + message + r"""</div>
+        <div class="confetti">🎉👏🔥</div>
+
+        <script>
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const now = ctx.currentTime;
+          function playBlast(time, duration, gainVal, freq) {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'square';
+            o.frequency.setValueAtTime(freq, time);
+            g.gain.setValueAtTime(gainVal, time);
+            g.gain.exponentialRampToValueAtTime(0.001, time + duration);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(time);
+            o.stop(time + duration + 0.02);
+          }
+          let t = now + 0.05;
+          const short = 0.06;
+          // first group
+          playBlast(t, short, 0.04, 600); t += 0.09;
+          playBlast(t, short, 0.04, 700); t += 0.09;
+          playBlast(t, short, 0.04, 800); t += 0.2;
+          // second group
+          playBlast(t, short, 0.045, 600); t += 0.09;
+          playBlast(t, short, 0.045, 700); t += 0.09;
+          playBlast(t, short, 0.045, 800);
+        } catch(e) {
+          console.log("Audio error:", e);
+        }
+        </script>
+        """
+        components.html(js_html, height=170)
 
 # -------------------------
-# Data loading
+# Data upload / load
 # -------------------------
 st.sidebar.header("Data Input")
-uploaded_file = st.sidebar.file_uploader("Upload IPL dataset (Excel or CSV). Leave empty to use sample dataset.", type=["xlsx","csv"])
+uploaded_file = st.sidebar.file_uploader("Upload IPL dataset (Excel or CSV). Leave empty to use sample dataset", type=["xlsx","csv"])
 if uploaded_file is not None:
     try:
         if uploaded_file.name.endswith(".xlsx"):
@@ -108,34 +144,43 @@ if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
         st.sidebar.success("Loaded dataset: " + uploaded_file.name)
     except Exception as e:
-        st.sidebar.error("Could not read file. Falling back to sample dataset. " + str(e))
-        df = generate_sample_dataset(400)
+        st.sidebar.error("Could not read file. Using sample dataset. Error: " + str(e))
+        df = generate_sample_dataset(300)
 else:
-    df = generate_sample_dataset(400)
-    st.sidebar.info("Using sample dataset (generated).")
+    # also check for a local file at /mnt/data/IPL_Auction_Dataset.xlsx (optional)
+    local_path = "/mnt/data/IPL_Auction_Dataset.xlsx"
+    if os.path.exists(local_path):
+        try:
+            df = pd.read_excel(local_path)
+            st.sidebar.success("Loaded local dataset: IPL_Auction_Dataset.xlsx")
+        except:
+            df = generate_sample_dataset(300)
+    else:
+        df = generate_sample_dataset(300)
+        st.sidebar.info("Using generated sample dataset.")
 
-# ensure required shape and types
+# required columns check
 required_cols = ["Team","Player_Role","Purse_Remaining","Target_Player","Expected_Bid","Buy_Probability(%)","Players_Needed","Base_Price"]
 missing = [c for c in required_cols if c not in df.columns]
 if missing:
-    st.warning(f"Uploaded dataset is missing columns {missing}. Using generated sample instead.")
-    df = generate_sample_dataset(400)
+    st.warning(f"Dataset missing columns {missing}. Using generated sample dataset instead.")
+    df = generate_sample_dataset(300)
 
-# numeric cast
+# cast numeric columns
 for c in ["Purse_Remaining","Expected_Bid","Buy_Probability(%)","Players_Needed","Base_Price"]:
     if c in df.columns:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
-# prefer player's display column
+# prefer Player_Name if present
 display_player_col = "Player_Name" if "Player_Name" in df.columns else "Target_Player"
 
-# Add human-friendly money axis columns (lakhs) for readability
+# add lakhs columns for nicer axes
 df["Expected_Bid_L"] = (df["Expected_Bid"] / 1_00_000).round(2)
 df["Base_Price_L"] = (df["Base_Price"] / 1_00_000).round(2)
 df["Purse_Remaining_L"] = (df["Purse_Remaining"] / 1_00_000).round(2)
 
 # -------------------------
-# Filters & controls
+# Filters & UI controls
 # -------------------------
 st.sidebar.header("Filters & Interactivity")
 teams_list = sorted(df["Team"].dropna().unique())
@@ -150,10 +195,8 @@ anim_speed = st.sidebar.slider("Animation speed (lower = faster)", 1, 10, 4)
 top_n_players = st.sidebar.number_input("Top N players", min_value=5, max_value=30, value=10)
 st.sidebar.markdown("---")
 enable_sunburst = st.sidebar.checkbox("Show Team→Role→Player sunburst", value=False)
-enable_highlight = st.sidebar.checkbox("Highlight selected player", value=True)
-
-# choose main metric
-main_metric = st.sidebar.selectbox("Main chart metric", ["Total Players Needed", "Unique Targets", "Avg Expected Bid (L)"])
+enable_highlight = st.sidebar.checkbox("Highlight selected player (scatter/table)", value=True)
+main_metric = st.sidebar.selectbox("Main chart metric", ["Total Players Needed","Unique Targets","Avg Expected Bid (L)"])
 
 # Apply filters
 df_filtered = df.copy()
@@ -170,17 +213,16 @@ unique_teams = sorted(df["Team"].dropna().unique())
 team_colors = {team: palette[i % len(palette)] for i, team in enumerate(unique_teams)}
 
 # -------------------------
-# Aggregations for main display
+# Aggregations & placeholders
 # -------------------------
 agg_filtered = None
 if not df_filtered.empty:
     agg_filtered = df_filtered.groupby("Team").agg(
         Total_Players_Needed=pd.NamedAgg("Players_Needed","sum"),
         Unique_Targets=pd.NamedAgg(display_player_col, lambda x: x.nunique()),
-        Avg_Expected_Bid_L=pd.NamedAgg("Expected_Bid_L", "mean")
+        Avg_Expected_Bid_L=pd.NamedAgg("Expected_Bid_L","mean")
     ).reset_index()
 
-# Layout placeholders (for in-place updates)
 col_main, col_side = st.columns([2,1])
 group_ph = col_main.empty()
 click_ph = col_main.empty()
@@ -191,35 +233,28 @@ top_ph = col_side.empty()
 sun_ph = col_main.empty()
 
 # -------------------------
-# Main grouped chart (only if data)
+# Main grouped chart + clickable bar
 # -------------------------
 with col_main:
-    st.subheader("Team demand — choose metric on the left")
+    st.subheader("Team demand — main metric selectable on the left")
     if agg_filtered is None or agg_filtered.empty:
         group_ph.info("No teams to display with current filters. Adjust filters or upload a dataset.")
         click_ph.empty()
     else:
-        # build group chart depending on main_metric selection
         if main_metric == "Total Players Needed":
             plot_df = agg_filtered[["Team","Total_Players_Needed","Unique_Targets"]].copy()
             melted = plot_df.melt(id_vars="Team", value_vars=["Total_Players_Needed","Unique_Targets"], var_name="Metric", value_name="Value")
-            fig_group = px.bar(melted, x="Team", y="Value", color="Metric", barmode="group", text="Value",
-                               title="Players Needed (sum) vs Unique Targets (count) — filtered")
+            fig_group = px.bar(melted, x="Team", y="Value", color="Metric", barmode="group", text="Value", title="Players Needed (sum) vs Unique Targets (count)")
+        elif main_metric == "Unique Targets":
+            fig_group = px.bar(agg_filtered, x="Team", y="Unique_Targets", color="Team", color_discrete_map=team_colors, text="Unique_Targets", title="Unique Target Players per Team")
         else:
-            if main_metric == "Unique Targets":
-                fig_group = px.bar(agg_filtered, x="Team", y="Unique_Targets", color="Team", color_discrete_map=team_colors,
-                                   title="Unique Target Players per Team", text="Unique_Targets")
-            else: # Avg Expected Bid (L)
-                fig_group = px.bar(agg_filtered, x="Team", y="Avg_Expected_Bid_L", color="Team", color_discrete_map=team_colors,
-                                   title="Avg Expected Bid (in lakhs ₹)", text="Avg_Expected_Bid_L")
-                fig_group.update_yaxes(title="Avg Expected Bid (₹ × 1e5 / lakhs)")
-
+            fig_group = px.bar(agg_filtered, x="Team", y="Avg_Expected_Bid_L", color="Team", color_discrete_map=team_colors, text="Avg_Expected_Bid_L", title="Avg Expected Bid (lakhs)")
+            fig_group.update_yaxes(title="Avg Expected Bid (lakhs)")
         fig_group.update_traces(textposition="outside")
         group_ph.plotly_chart(fig_group, use_container_width=True)
 
-        # clickable single-series chart for selecting team (Total_Players_Needed)
-        fig_click = px.bar(agg_filtered, x="Team", y="Total_Players_Needed", text="Total_Players_Needed", color="Team",
-                           color_discrete_map=team_colors, title="(Click team) — Total Players Needed")
+        # clickable single-series bar (Total_Players_Needed) for selecting team
+        fig_click = px.bar(agg_filtered, x="Team", y="Total_Players_Needed", text="Total_Players_Needed", color="Team", color_discrete_map=team_colors, title="(Click team) — Total Players Needed")
         fig_click.update_traces(marker_line_color='black', marker_line_width=1)
         click_ph.plotly_chart(fig_click, use_container_width=True)
         bar_click = plotly_events(fig_click, click_event=True, hover_event=False)
@@ -232,10 +267,10 @@ if len(teams_multiselect) == 1:
     clicked_team = teams_multiselect[0]
 
 # -------------------------
-# Scatter (use lakhs) and interaction
+# Scatter (lakhs) with selection
 # -------------------------
 with col_main:
-    st.subheader("Expected Bid vs Buy Probability (lakhs)")
+    st.subheader("Expected Bid (lakhs) vs Buy Probability (%)")
     if df_filtered.empty:
         scatter_ph.info("No points for current filters.")
         scatter_click = []
@@ -246,14 +281,14 @@ with col_main:
             color_map = team_colors
         fig_scatter = px.scatter(df_filtered, x="Expected_Bid_L", y="Buy_Probability(%)", color="Team",
                                  hover_data=[display_player_col, "Player_Role", "Base_Price_L"],
-                                 title="Expected Bid (lakhs) vs Buy Probability (%)", color_discrete_map=color_map, height=430)
+                                 title="Expected Bid (lakhs) vs Buy Probability", color_discrete_map=color_map, height=440)
         fig_scatter.update_layout(clickmode="event+select")
-        fig_scatter.update_xaxes(title="Expected Bid (₹ ×100k = lakhs)")
+        fig_scatter.update_xaxes(title="Expected Bid (lakhs ₹)")
         scatter_ph.plotly_chart(fig_scatter, use_container_width=True)
         scatter_click = plotly_events(fig_scatter, click_event=True, hover_event=False)
 
 # -------------------------
-# Side charts (box + mean + top players)
+# Side charts: box, mean, top players
 # -------------------------
 with col_side:
     st.subheader("Expected Bid by Team")
@@ -273,7 +308,7 @@ with col_side:
         st.subheader(f"Top {top_n_players} Players")
         top_players = (
             df_filtered.groupby(display_player_col)
-            .agg({"Buy_Probability(%)":"max", "Expected_Bid_L":"max", "Team": lambda x: x.mode().iat[0] if not x.mode().empty else x.iloc[0]})
+            .agg({"Buy_Probability(%)":"max","Expected_Bid_L":"max","Team": lambda x: x.mode().iat[0] if not x.mode().empty else x.iloc[0]})
             .reset_index()
             .sort_values(["Buy_Probability(%)","Expected_Bid_L"], ascending=[False, False])
             .head(int(top_n_players))
@@ -285,18 +320,17 @@ with col_side:
 # optional sunburst
 if enable_sunburst and not df_filtered.empty:
     st.subheader("Team → Role → Player (sunburst)")
-    top_entries = (df_filtered.groupby(["Team","Player_Role",display_player_col])
-                   .agg({"Buy_Probability(%)":"max"}).reset_index().sort_values("Buy_Probability(%)", ascending=False).head(200))
+    top_entries = (df_filtered.groupby(["Team","Player_Role",display_player_col]).agg({"Buy_Probability(%)":"max"}).reset_index().sort_values("Buy_Probability(%)", ascending=False).head(200))
     fig_sun = px.sunburst(top_entries, path=["Team","Player_Role",display_player_col], values="Buy_Probability(%)", color="Team", color_discrete_map=team_colors, title="Sunburst")
     sun_ph.plotly_chart(fig_sun, use_container_width=True)
 
 # -------------------------
-# Details & selection panel
+# Details panel & animation buttons
 # -------------------------
 st.markdown("---")
 left_col, right_col = st.columns([1,2])
 
-# derive selected player from scatter click
+# selected player name from scatter
 selected_player_name = None
 if 'scatter_click' in locals() and scatter_click:
     sp = scatter_click[0]
@@ -332,26 +366,24 @@ with left_col:
             rc = team_df["Player_Role"].value_counts().reset_index(); rc.columns=["Role","Count"]
             st.table(rc)
             if st.button(f"Animate {clicked_team} (short)"):
-                # animate role pie & histogram and finish with sound+animation
-                role_counts = team_df["Player_Role"].value_counts().reset_index(); role_counts.columns=["Player_Role","Count"]
-                # pie animate
+                # animate pie + histogram in placeholders then play sound+animation
                 pie_ph = left_col.empty()
                 hist_ph = left_col.empty()
+                role_counts = team_df["Player_Role"].value_counts().reset_index(); role_counts.columns=["Player_Role","Count"]
+                roles = role_counts["Player_Role"].tolist(); vals = role_counts["Count"].tolist()
                 steps = 10
                 sleep_t = max(0.01, 0.06/ max(1, anim_speed))
-                roles = role_counts["Player_Role"].tolist(); vals=role_counts["Count"].tolist()
                 for s in range(1, steps+1):
                     inter = [int(v*s/steps) for v in vals]
                     pie_ph.plotly_chart(px.pie(pd.DataFrame({"Player_Role":roles,"Count":inter}), names="Player_Role", values="Count", title=f"{clicked_team} role (anim)"), use_container_width=True)
                     time.sleep(sleep_t)
-                # histogram animate
                 hist_vals, edges = np.histogram(team_df["Expected_Bid_L"], bins=6)
                 for s in range(1, steps+1):
                     inter = (hist_vals*s/steps).astype(int)
                     df_hist = pd.DataFrame({"edge": edges[:-1], "count": inter})
                     hist_ph.plotly_chart(px.bar(df_hist, x="edge", y="count", title=f"{clicked_team} Expected Bid (lakhs) (anim)"), use_container_width=True)
                     time.sleep(sleep_t)
-                play_ipl_sound_and_show_animation(f"{clicked_team} — Nice pick! Enjoy 🎉")
+                play_ipl_theme_with_animation(f"{clicked_team} — Nice pick! Enjoy 🎉")
     else:
         st.subheader("Overview")
         st.markdown("Click a team bar or select a single team to view details and animate it.")
@@ -362,8 +394,7 @@ with right_col:
         pr = df[df[display_player_col]==selected_player_name]
         if not pr.empty:
             st.dataframe(pr.sort_values("Buy_Probability(%)", ascending=False).reset_index(drop=True), use_container_width=True)
-            # highlight in scatter: replot the scatter with diamond marker for this player
-            fig_h = px.scatter(df_filtered, x="Expected_Bid_L", y="Buy_Probability(%)", color="Team", hover_data=[display_player_col, "Player_Role"], color_discrete_map=team_colors)
+            fig_h = px.scatter(df_filtered, x="Expected_Bid_L", y="Buy_Probability(%)", color="Team", hover_data=[display_player_col,"Player_Role"], color_discrete_map=team_colors)
             fig_h.add_scatter(x=pr["Expected_Bid_L"], y=pr["Buy_Probability(%)"], mode="markers+text", marker=dict(size=14, color="black", symbol="diamond"), text=pr[display_player_col], textposition="top center", name="Selected")
             scatter_ph.plotly_chart(fig_h, use_container_width=True)
         else:
@@ -374,7 +405,7 @@ with right_col:
         st.dataframe(df_filtered.head(100), use_container_width=True)
 
 # -------------------------
-# Quick animate bars (only when clicked)
+# Quick Animate Bars (short) — runs only when clicked
 # -------------------------
 if st.button("Quick Animate Bars (short)"):
     if agg_filtered is not None and not agg_filtered.empty:
@@ -389,10 +420,10 @@ if st.button("Quick Animate Bars (short)"):
             melt = temp.melt(id_vars="Team", value_vars=["Total_Players_Needed","Unique_Targets"], var_name="Metric", value_name="Value")
             group_ph.plotly_chart(px.bar(melt, x="Team", y="Value", color="Metric", barmode="group", text="Value", title="Animating players-needed (short)"), use_container_width=True)
             time.sleep(anim_speed_local)
-    play_ipl_sound_and_show_animation("Short dashboard animation — lovely shot! 😄")
+    play_ipl_theme_with_animation("Short dashboard animation — enjoy! 🎉")
 
 # -------------------------
-# Download filtered
+# Download filtered CSV
 # -------------------------
 @st.cache_data
 def convert_df_to_csv(df_in):
