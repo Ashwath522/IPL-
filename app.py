@@ -1,6 +1,5 @@
-# app.py — FULL Version A with IPL bat+ball animation + your local MP3 path
-# Keep all original charts/filters/behavior; replaced balloons with IPL animation + sound.
-# Run locally to allow playing local MP3 at THEME_MP3_PATH (your provided path).
+# app.py — Version A merged with per-team selection + IPL theme (local path)
+# Keep all original charts/filters/behavior; added team select and Play Team Theme (plays local mp3).
 import os
 import time
 import streamlit as st
@@ -32,7 +31,7 @@ THEME_MP3_PATH = r"d:\Users\DELL\Downloads\ipl_theme.mp3"
 def play_ipl_theme_with_animation(message="That’s a lovely shot!"):
     """
     Shows a short bat+ball animation and plays the MP3 at THEME_MP3_PATH (local file).
-    If the mp3 path does not exist, shows a fallback message.
+    If the mp3 path does not exist, shows a fallback short synthetic audio + animation.
     """
     mp3_path = THEME_MP3_PATH.replace("\\", "/")
     if os.path.exists(THEME_MP3_PATH):
@@ -168,7 +167,15 @@ for col in ["Purse_Remaining", "Expected_Bid", "Buy_Probability(%)", "Players_Ne
     if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-# Sidebar filters & interaction settings
+# ---------------------------
+# NEW: Sidebar single-team selector (user requested)
+# ---------------------------
+st.sidebar.markdown("---")
+st.sidebar.header("Team Quick Select")
+teams_list_sidebar = sorted(df["Team"].dropna().unique())
+team_single_select = st.sidebar.selectbox("Pick one team to focus (optional)", options=["(none)"] + teams_list_sidebar, index=0)
+
+# Sidebar filters & interaction settings (existing)
 st.sidebar.header("Filters & Interactivity")
 teams_list = sorted(df["Team"].dropna().unique())
 teams_multiselect = st.sidebar.multiselect("Select teams (multi)", options=teams_list, default=teams_list)
@@ -219,7 +226,9 @@ if bar_click:
     clicked_team = bp.get("x") or bp.get("label") or None
 
 # If user forced a single team selection in sidebar, prefer that
-if len(teams_multiselect) == 1:
+if team_single_select and team_single_select != "(none)":
+    clicked_team = team_single_select
+elif len(teams_multiselect) == 1:
     clicked_team = teams_multiselect[0]
 
 # 2) Scatter: Expected Bid vs Buy Probability (click a point to pick player)
@@ -357,6 +366,10 @@ with detail_col:
             ).reset_index().sort_values(["Buy_Probability", "Expected_Bid"], ascending=[False, False])
             st.dataframe(team_stats.head(50), use_container_width=True)
 
+            # New: Play team theme button — plays the IPL MP3 (local path) + animation for this team
+            if st.button(f"Play Team Theme — {clicked_team}"):
+                # play the mp3 + animation with team message
+                play_ipl_theme_with_animation(f"{clicked_team} — Enjoy the team theme!")
         else:
             st.info("No records for this team.")
     else:
