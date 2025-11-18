@@ -1,10 +1,11 @@
-# app.py (streamlined: ~5-6 interactive charts, consistent team colors)
+# app.py (updated: cricket-themed animation + Player_Name support)
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 from streamlit_plotly_events import plotly_events
 import time
+import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide", page_title="IPL Auction Visualizer (Interactive)", page_icon="🏏")
 
@@ -44,6 +45,33 @@ def generate_sample_dataset(n_rows=200, seed=42):
     df = pd.DataFrame(rows)
     return df
 
+# small cricket animation HTML snippet
+def cricket_animation_html():
+    return r"""
+    <style>
+    .cricket-wrap { position: relative; width:100%; height:80px; overflow:hidden; margin:8px 0 16px 0; }
+    .ball {
+      font-size:48px;
+      position: absolute;
+      left:-15%;
+      top:10px;
+      animation: roll 1.2s linear 0s 1 forwards;
+      transform-origin: center;
+    }
+    @keyframes roll {
+      0%   { left:-15%; transform: rotate(0deg); opacity:0; }
+      20%  { opacity:1; }
+      50%  { left:45%; transform: rotate(360deg); }
+      100% { left:115%; transform: rotate(720deg); opacity:1; }
+    }
+    .play-text { font-weight:700; margin-top:6px; font-size:16px; }
+    </style>
+    <div class="cricket-wrap">
+      <div class="ball">🏏</div>
+    </div>
+    <div class="play-text">Play ball! — Cricket animation finished 🏏</div>
+    """
+
 # Sidebar: dataset upload or use sample
 st.sidebar.header("Data Input")
 uploaded_file = st.sidebar.file_uploader("Upload IPL dataset (Excel or CSV). Leave empty to use sample dataset.", type=["xlsx", "csv"])
@@ -72,6 +100,9 @@ if missing:
 for col in ["Purse_Remaining", "Expected_Bid", "Buy_Probability(%)", "Players_Needed", "Base_Price"]:
     if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+# decide which player name column to use (prefer Player_Name if present)
+display_player_col = "Player_Name" if "Player_Name" in df.columns else "Target_Player"
 
 # Sidebar filters & interaction settings
 st.sidebar.header("Filters & Interactivity")
@@ -136,8 +167,9 @@ with col_main:
             color_map = {t: team_colors[t] if t == clicked_team else "lightgray" for t in unique_teams}
         else:
             color_map = team_colors
+        # include display_player_col in hover_data so selection can extract it
         fig_scatter = px.scatter(df_filtered, x="Expected_Bid", y="Buy_Probability(%)", color="Team",
-                                 hover_data=["Target_Player", "Player_Role", "Base_Price"],
+                                 hover_data=[display_player_col, "Player_Role", "Base_Price"],
                                  title="Expected Bid vs Buy Probability",
                                  color_discrete_map=color_map,
                                  height=420)
@@ -169,7 +201,6 @@ with col_main:
     if not df_filtered.empty:
         heat = df_filtered.groupby(["Team", "Player_Role"]).size().unstack(fill_value=0)
         fig_heat = px.imshow(heat, labels=dict(x="Player Role", y="Team", color="Count"), x=heat.columns, y=heat.index, aspect="auto", title="Players count by Team and Role")
-        # apply team colors to y-axis by mapping tickfont color (plotly doesn't support per-tick color in a simple call, but we'll set tickfont color uniformly)
         st.plotly_chart(fig_heat, use_container_width=True)
     else:
         st.info("No data for heatmap")
@@ -179,14 +210,14 @@ with col_side:
     st.subheader(f"Top {top_n_players} Target Players")
     if not df_filtered.empty:
         top_players = (
-            df_filtered.groupby("Target_Player")
+            df_filtered.groupby(display_player_col)
             .agg({"Buy_Probability(%)": "max", "Expected_Bid": "max", "Team": lambda x: x.mode().iat[0] if not x.mode().empty else x.iloc[0]})
             .reset_index()
             .sort_values(["Buy_Probability(%)", "Expected_Bid"], ascending=[False, False])
             .head(int(top_n_players))
         )
         # color by team with the same consistent map
-        fig_top = px.bar(top_players, x="Target_Player", y="Buy_Probability(%)", color="Team",
+        fig_top = px.bar(top_players, x=display_player_col, y="Buy_Probability(%)", color="Team",
                          color_discrete_map=team_colors, hover_data=["Expected_Bid"], title="Top Target Players — Buy Probability")
         fig_top.update_layout(xaxis_tickangle=-45, height=380)
         st.plotly_chart(fig_top, use_container_width=True)
@@ -196,11 +227,11 @@ with col_side:
 # Optional 6) Sunburst (toggle)
 if enable_sunburst and not df_filtered.empty:
     st.subheader("Team → Role → Player (sunburst)")
-    top_entries = (df_filtered.groupby(["Team", "Player_Role", "Target_Player"])
+    top_entries = (df_filtered.groupby(["Team", "Player_Role", display_player_col])
                    .agg({"Buy_Probability(%)": "max"})
                    .reset_index())
     top_entries = top_entries.sort_values("Buy_Probability(%)", ascending=False).head(200)
-    fig_sun = px.sunburst(top_entries, path=["Team", "Player_Role", "Target_Player"], values="Buy_Probability(%)",
+    fig_sun = px.sunburst(top_entries, path=["Team", "Player_Role", display_player_col], values="Buy_Probability(%)",
                           color="Team", color_discrete_map=team_colors, title="Sunburst: Team -> Role -> Player")
     st.plotly_chart(fig_sun, use_container_width=True)
 
@@ -212,22 +243,20 @@ detail_col, preview_col = st.columns([1, 2])
 selected_player_name = None
 if scatter_click:
     sp = scatter_click[0]
-    # Try to extract the player name from customdata or hovertext
     cd = sp.get("customdata")
     hovertext = sp.get("hovertext")
     txt = sp.get("text")
-    # Our hover_data included "Target_Player" so customdata may contain it
+    # customdata likely contains the display_player_col as first or one of entries
     if isinstance(cd, (list, tuple)) and cd:
-        # find a string that doesn't look like numeric
         for item in cd:
-            if isinstance(item, str) and len(item) > 2:
+            if isinstance(item, str) and len(item) > 1:
                 selected_player_name = item
                 break
     if selected_player_name is None and isinstance(hovertext, str):
         selected_player_name = hovertext
     if selected_player_name is None and isinstance(txt, str):
         selected_player_name = txt
-    # fallback: try matching by x,y coordinates (Expected_Bid/Buy_Probability)
+    # fallback coordinate match
     if selected_player_name is None:
         x_val = sp.get("x")
         y_val = sp.get("y")
@@ -237,7 +266,7 @@ if scatter_click:
                 (np.isclose(df_filtered["Buy_Probability(%)"], float(y_val), atol=1e-6))
             ]
             if not close.empty:
-                selected_player_name = close.iloc[0]["Target_Player"]
+                selected_player_name = close.iloc[0][display_player_col]
 
 # Show team metrics on the left
 with detail_col:
@@ -248,7 +277,6 @@ with detail_col:
             st.metric("Players in dataset", len(team_df))
             st.metric("Sum Players Needed", int(team_df["Players_Needed"].sum()))
             st.metric("Avg Expected Bid", f"₹{int(team_df['Expected_Bid'].mean()):,}")
-            # small role breakdown
             rcounts = team_df["Player_Role"].value_counts().reset_index()
             rcounts.columns = ["Player_Role", "Count"]
             st.table(rcounts)
@@ -262,16 +290,16 @@ with detail_col:
 with preview_col:
     if selected_player_name and enable_highlight:
         st.subheader(f"Selected Player: {selected_player_name}")
-        player_rows = df[df["Target_Player"] == selected_player_name]
+        player_rows = df[df[display_player_col] == selected_player_name]
         if not player_rows.empty:
             st.dataframe(player_rows.sort_values("Buy_Probability(%)", ascending=False).reset_index(drop=True), use_container_width=True)
             # replot scatter with highlighted selected player marker
             fig_highlight = px.scatter(df_filtered, x="Expected_Bid", y="Buy_Probability(%)", color="Team",
-                                       hover_data=["Target_Player", "Player_Role"], color_discrete_map=team_colors,
+                                       hover_data=[display_player_col, "Player_Role"], color_discrete_map=team_colors,
                                        title="Expected Bid vs Buy Probability (selected highlighted)")
             fig_highlight.add_scatter(x=player_rows["Expected_Bid"], y=player_rows["Buy_Probability(%)"],
                                       mode="markers+text", marker=dict(size=14, color="black", symbol="diamond"),
-                                      text=player_rows["Target_Player"], textposition="top center", name="Selected Player")
+                                      text=player_rows[display_player_col], textposition="top center", name="Selected Player")
             st.plotly_chart(fig_highlight, use_container_width=True)
         else:
             st.info("Selected player not found in full dataset.")
@@ -295,6 +323,7 @@ if st.button("Quick Animate Bars"):
     teams_order = agg_vals["Team"].tolist()
     final_vals = agg_vals["Players_Needed"].tolist()
     steps = 20
+    # use a single placeholder-like behavior by replotting in place
     for step in range(1, steps + 1):
         intermediate = [int(v * step / steps) for v in final_vals]
         df_anim = pd.DataFrame({"Team": teams_order, "Players_Needed": intermediate})
@@ -303,5 +332,6 @@ if st.button("Quick Animate Bars"):
         fig.update_traces(marker_line_color='black', marker_line_width=1)
         st.plotly_chart(fig, use_container_width=True)
         time.sleep(anim_speed_local)
-    st.balloons()
+    # replace balloons with cricket animation
+    components.html(cricket_animation_html(), height=120)
     st.success("Quick animation finished.")
