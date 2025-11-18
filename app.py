@@ -1,4 +1,4 @@
-# app.py — updated: clearer Players Needed chart + bat+ball animation + snappy interactions
+# app.py — animations only after button click (dashboard + team animations)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,8 +8,8 @@ import time
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide", page_title="IPL Auction Visualizer (Interactive)", page_icon="🏏")
-st.title("IPL Auction Visualizer ")
-st.markdown("Click a team bar to focus on a team (or pick a team in the sidebar). Short cricket animation available — quick and cheerful!")
+st.title("IPL Auction Visualizer — Interactive & Happy")
+st.markdown("Click a team bar to focus on a team (or pick a team in the sidebar). Press animation buttons to run short, cheerful animations.")
 
 # ---------------------------
 # short cricket bat+ball animation HTML snippet (quick, ~0.8s)
@@ -32,17 +32,17 @@ def cricket_bat_ball_html():
       55% { left:40%; transform: rotate(10deg); }
       100% { left:110%; transform: rotate(25deg); opacity:1; }
     }
-    .msg { font-weight:700; margin-top:6px; font-size:15px; }
+    .msg { font-weight:700; margin-top:6px; font-size:15px; text-align:center; }
     </style>
     <div class="wrap">
       <div class="bat">🏏</div>
       <div class="ball">🏐</div>
     </div>
-    <div class="msg">That’s a lovely shot! ✨ Enjoy the view — short animation complete.</div>
+    <div class="msg">That’s a lovely shot! ✨ Short animation complete.</div>
     """
 
 # ---------------------------
-# Sample dataset generator (same as before)
+# Sample dataset generator
 # ---------------------------
 @st.cache_data
 def generate_sample_dataset(n_rows=200, seed=42):
@@ -145,23 +145,32 @@ unique_teams = sorted(df["Team"].dropna().unique())
 team_colors = {team: palette[i % len(palette)] for i, team in enumerate(unique_teams)}
 
 # ---------------------------
-# Layout
+# Layout and placeholders
 # ---------------------------
 col_main, col_side = st.columns([2, 1])
+
+# placeholders for main grouped chart, clickable bar, and scatter — used for in-place animation
+group_placeholder = col_main.empty()
+clickable_placeholder = col_main.empty()
+scatter_placeholder = col_main.empty()
+# side placeholders
+box_placeholder = col_side.empty()
+mean_placeholder = col_side.empty()
+top_players_placeholder = col_side.empty()
+sunburst_placeholder = col_main.empty()
+
+# ---- Build aggregated filtered metrics used throughout
+agg_filtered = df_filtered.groupby("Team").agg(
+    Total_Players_Needed=pd.NamedAgg(column="Players_Needed", aggfunc="sum"),
+    Unique_Targets=pd.NamedAgg(column=display_player_col, aggfunc=lambda x: x.nunique())
+).reset_index().sort_values("Total_Players_Needed", ascending=False)
 
 # ---- 1) MAIN grouped bar: Players Needed (sum) and Unique Targets (count)
 with col_main:
     st.subheader("Team demand — Players Needed (sum) & Unique Target Count")
-    # use filtered data so chart responds to filters
-    agg_filtered = df_filtered.groupby("Team").agg(
-        Total_Players_Needed=pd.NamedAgg(column="Players_Needed", aggfunc="sum"),
-        Unique_Targets=pd.NamedAgg(column=display_player_col, aggfunc=lambda x: x.nunique())
-    ).reset_index().sort_values("Total_Players_Needed", ascending=False)
-
     if agg_filtered.empty:
-        st.info("No data to display for current filters.")
+        group_placeholder.info("No data to display for current filters.")
     else:
-        # grouped bar chart so both metrics are visible
         fig_group = px.bar(
             agg_filtered.melt(id_vars="Team", value_vars=["Total_Players_Needed", "Unique_Targets"],
                               var_name="Metric", value_name="Value"),
@@ -170,22 +179,18 @@ with col_main:
             text="Value",
             height=420
         )
-        # apply team colors for the 'Team' x-axis ticks via consistent palette for other charts (bars are by Metric)
         fig_group.update_traces(texttemplate="%{text}", textposition="outside")
-        st.plotly_chart(fig_group, use_container_width=True)
+        group_placeholder.plotly_chart(fig_group, use_container_width=True)
 
-        # show numeric table under the chart for exact numbers (makes viewer happy — neat table)
         st.markdown("**Team demand table**")
         st.dataframe(agg_filtered.style.format({"Total_Players_Needed":"{:.0f}", "Unique_Targets":"{:.0f}"}), use_container_width=True)
 
-    # capture clicks on the group chart by re-rendering a simple team-only bar (we still support plotly_events)
-    # create a single-team bar chart variant for clickability
-    # We'll present a compact single-series bar (Total_Players_Needed) for click-events
+    # compact clickable total-players-needed chart (for selecting team)
     if not agg_filtered.empty:
         fig_clickable = px.bar(agg_filtered, x="Team", y="Total_Players_Needed", text="Total_Players_Needed",
-                               title="(Click team) — Total Players Needed", color="Team", color_discrete_map=team_colors, height=280)
+                               title="(Click team) — Total Players Needed", color="Team", color_discrete_map=team_colors, height=300)
         fig_clickable.update_traces(marker_line_color='black', marker_line_width=1)
-        st.plotly_chart(fig_clickable, use_container_width=True)
+        clickable_placeholder.plotly_chart(fig_clickable, use_container_width=True)
         bar_click = plotly_events(fig_clickable, click_event=True, hover_event=False)
     else:
         bar_click = []
@@ -199,7 +204,7 @@ if bar_click:
 if len(teams_multiselect) == 1:
     clicked_team = teams_multiselect[0]
 
-# ---- 2) Scatter: Expected Bid vs Buy Probability
+# ---- 2) Scatter: Expected Bid vs Buy Probability (in placeholder)
 with col_main:
     st.subheader("Expected Bid vs Buy Probability")
     if not df_filtered.empty:
@@ -211,26 +216,26 @@ with col_main:
                                  hover_data=[display_player_col, "Player_Role", "Base_Price"],
                                  title="Expected Bid vs Buy Probability", color_discrete_map=color_map, height=420)
         fig_scatter.update_layout(clickmode="event+select")
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        scatter_placeholder.plotly_chart(fig_scatter, use_container_width=True)
         scatter_click = plotly_events(fig_scatter, click_event=True, hover_event=False)
     else:
-        st.info("No data for current filters.")
+        scatter_placeholder.info("No data for current filters.")
         scatter_click = []
 
-# ---- 3) Box + Mean bar on side
+# ---- 3) Box + Mean on side using placeholders
 with col_side:
     st.subheader("Expected Bid by Team")
     if not df_filtered.empty:
         fig_box = px.box(df_filtered, x="Team", y="Expected_Bid", color="Team", color_discrete_map=team_colors, points="outliers")
-        st.plotly_chart(fig_box, use_container_width=True)
+        box_placeholder.plotly_chart(fig_box, use_container_width=True)
         mean_by_team = df_filtered.groupby("Team")["Expected_Bid"].mean().reset_index().sort_values("Expected_Bid", ascending=False)
         fig_mean = px.bar(mean_by_team, x="Team", y="Expected_Bid", text="Expected_Bid", color="Team", color_discrete_map=team_colors)
         fig_mean.update_traces(texttemplate="₹%{text:,.0f}", textposition="outside")
-        st.plotly_chart(fig_mean, use_container_width=True)
+        mean_placeholder.plotly_chart(fig_mean, use_container_width=True)
     else:
-        st.info("No data to display Expected Bid charts")
+        box_placeholder.info("No data to display Expected Bid charts")
 
-# ---- 4) Heatmap Team vs Role
+# ---- 4) Heatmap Team vs Role (static)
 with col_main:
     st.subheader("Team vs Role (heatmap)")
     if not df_filtered.empty:
@@ -240,7 +245,7 @@ with col_main:
     else:
         st.info("No data for heatmap")
 
-# ---- 5) Top players list
+# ---- 5) Top players list (placeholder)
 with col_side:
     st.subheader(f"Top {top_n_players} Players (by Buy Probability)")
     if not df_filtered.empty:
@@ -252,11 +257,10 @@ with col_side:
             .head(int(top_n_players))
         )
         fig_top = px.bar(top_players, x=display_player_col, y="Buy_Probability(%)", color="Team",
-                         color_discrete_map=team_colors, hover_data=["Expected_Bid"], title="Top Players — Buy Probability")
-        fig_top.update_layout(xaxis_tickangle=-45, height=380)
-        st.plotly_chart(fig_top, use_container_width=True)
+                         color_discrete_map=team_colors, hover_data=["Expected_Bid"], title="Top Players — Buy Probability", height=380)
+        top_players_placeholder.plotly_chart(fig_top, use_container_width=True)
     else:
-        st.info("No data for top players")
+        top_players_placeholder.info("No data for top players")
 
 # Optional sunburst
 if enable_sunburst and not df_filtered.empty:
@@ -267,7 +271,7 @@ if enable_sunburst and not df_filtered.empty:
     top_entries = top_entries.sort_values("Buy_Probability(%)", ascending=False).head(200)
     fig_sun = px.sunburst(top_entries, path=["Team", "Player_Role", display_player_col], values="Buy_Probability(%)",
                           color="Team", color_discrete_map=team_colors, title="Sunburst: Team -> Role -> Player")
-    st.plotly_chart(fig_sun, use_container_width=True)
+    sunburst_placeholder.plotly_chart(fig_sun, use_container_width=True)
 
 # ---- Details & selection panel
 st.markdown("---")
@@ -301,6 +305,7 @@ if scatter_click:
             if not close.empty:
                 selected_player_name = close.iloc[0][display_player_col]
 
+# Left panel: team details + Animate Selected Team button
 with detail_col:
     if clicked_team:
         st.subheader(f"Team: {clicked_team}")
@@ -312,29 +317,56 @@ with detail_col:
             rcounts = team_df["Player_Role"].value_counts().reset_index()
             rcounts.columns = ["Player_Role", "Count"]
             st.table(rcounts)
-            # handy quick animate team button (short)
+            # animate selected team (only when button clicked)
             if st.button(f"Animate {clicked_team} (short)"):
+                # animate team pie (role breakdown) and histogram in-place using placeholders
+                team_pie_ph = detail_col.empty()
+                team_hist_ph = detail_col.empty()
+                # role counts
+                role_counts = team_df["Player_Role"].value_counts().reset_index()
+                role_counts.columns = ["Player_Role", "Count"]
+                roles = role_counts["Player_Role"].tolist()
+                vals = role_counts["Count"].tolist()
+                steps = 10
+                sleep_t = max(0.01, 0.06 / max(1, anim_speed))
+                for s in range(1, steps + 1):
+                    inter = [int(v * s / steps) for v in vals]
+                    df_temp = pd.DataFrame({"Player_Role": roles, "Count": inter})
+                    fig_t = px.pie(df_temp, names="Player_Role", values="Count", title=f"{clicked_team} - Role Breakdown (anim)")
+                    team_pie_ph.plotly_chart(fig_t, use_container_width=True)
+                    time.sleep(sleep_t)
+                # histogram animate
+                hist_vals, edges = np.histogram(team_df["Expected_Bid"], bins=6)
+                for s in range(1, steps + 1):
+                    inter = (hist_vals * s / steps).astype(int)
+                    df_hist = pd.DataFrame({"bin": range(len(inter)), "count": inter, "edge": edges[:-1]})
+                    fig_h = px.bar(df_hist, x="edge", y="count", labels={"edge": "Expected_Bid (₹)", "count": "Count"}, title=f"{clicked_team} - Expected Bid (anim)")
+                    team_hist_ph.plotly_chart(fig_h, use_container_width=True)
+                    time.sleep(sleep_t)
+                # short cricket animation at end
                 components.html(cricket_bat_ball_html(), height=120)
-                st.success(f"{clicked_team} — nice animation! 😄")
+                st.success(f"{clicked_team} animation done! 😊")
         else:
             st.info("No records for this team.")
     else:
         st.subheader("Overview")
         st.markdown("Click a team bar or select a single team in the sidebar to view team details.")
 
+# Right panel: selected player preview / filtered table
 with preview_col:
     if selected_player_name and enable_highlight:
         st.subheader(f"Selected Player: {selected_player_name}")
         player_rows = df[df[display_player_col] == selected_player_name]
         if not player_rows.empty:
             st.dataframe(player_rows.sort_values("Buy_Probability(%)", ascending=False).reset_index(drop=True), use_container_width=True)
+            # highlight in scatter
             fig_highlight = px.scatter(df_filtered, x="Expected_Bid", y="Buy_Probability(%)", color="Team",
                                        hover_data=[display_player_col, "Player_Role"], color_discrete_map=team_colors,
                                        title="Expected Bid vs Buy Probability (selected highlighted)")
             fig_highlight.add_scatter(x=player_rows["Expected_Bid"], y=player_rows["Buy_Probability(%)"],
                                       mode="markers+text", marker=dict(size=14, color="black", symbol="diamond"),
                                       text=player_rows[display_player_col], textposition="top center", name="Selected Player")
-            st.plotly_chart(fig_highlight, use_container_width=True)
+            scatter_placeholder.plotly_chart(fig_highlight, use_container_width=True)
         else:
             st.info("Selected player not found in full dataset.")
     else:
@@ -350,23 +382,26 @@ def convert_df_to_csv(input_df):
 csv = convert_df_to_csv(df_filtered)
 st.download_button("Download filtered data as CSV", data=csv, file_name="ipl_filtered_data.csv", mime="text/csv")
 
-# ---- Quick Animate Bars (short + happy)
+# ---- Quick Animate Bars (short) — runs only when clicked
 if st.button("Quick Animate Bars (short)"):
-    # quick growth animation by replotting a few steps only
-    anim_speed_local = max(0.01, 0.08 / max(1, anim_speed))  # shorter and snappier
     if not agg_filtered.empty:
+        anim_speed_local = max(0.01, 0.06 / max(1, anim_speed))  # faster, snappier
         teams_order = agg_filtered["Team"].tolist()
         final_vals = agg_filtered["Total_Players_Needed"].tolist()
-        steps = 10  # short
+        steps = 10
+        # animate only the grouped chart placeholder (repaint)
         for step in range(1, steps + 1):
             intermediate = [int(v * step / steps) for v in final_vals]
-            df_anim = pd.DataFrame({"Team": teams_order, "Players_Needed": intermediate})
-            fig = px.bar(df_anim, x="Team", y="Players_Needed", text="Players_Needed",
-                         color="Team", color_discrete_map=team_colors, title="Animating Players Needed (short)")
-            fig.update_traces(marker_line_color='black', marker_line_width=1)
-            st.plotly_chart(fig, use_container_width=True)
+            df_anim = pd.DataFrame({"Team": teams_order, "Total_Players_Needed": intermediate})
+            # rebuild grouped melt for display (Unique_Targets frozen during this quick anim)
+            # create temp melted DF with same Unique_Targets values scaled proportionally (kept simple)
+            temp = agg_filtered.copy()
+            temp["Total_Players_Needed"] = intermediate
+            melt_df = temp.melt(id_vars="Team", value_vars=["Total_Players_Needed", "Unique_Targets"], var_name="Metric", value_name="Value")
+            fig_anim = px.bar(melt_df, x="Team", y="Value", color="Metric", barmode="group", text="Value", title="Animating: Players Needed vs Unique Targets (short)")
+            fig_anim.update_traces(texttemplate="%{text}", textposition="outside")
+            group_placeholder.plotly_chart(fig_anim, use_container_width=True)
             time.sleep(anim_speed_local)
-    # show short bat+ball animation and a cheerful message
+    # finish with short cricket animation
     components.html(cricket_bat_ball_html(), height=120)
-    st.success("That looked good! 😄 Enjoy the updated view.")
-
+    st.success("Short dashboard animation finished — enjoy! 😄")
