@@ -8,7 +8,7 @@ import time
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide", page_title="IPL Auction Visualizer (Interactive)", page_icon="🏏")
-st.title("IPL Auction Visualizer — Interactive & Happy")
+st.title("IPL Auction Visualizer ")
 st.markdown("Click a team bar to focus on a team (or pick a team in the sidebar). Short cricket animation available — quick and cheerful!")
 
 # ---------------------------
